@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Camera アプリ</title>
+    <link rel="stylesheet" href="css/reset.css">
+    <script src="https://kit.fontawesome.com/cd8deebb58.js" crossorigin="anonymous"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css" type="text/css" media="all">
+</head>
+
+<body>
+    <!-- タイトル文字 -->
+    <h1>Camera App</h1>
+
+    <section id="contents">
+        <!-- カメラ全体 -->
+        <div id="camera-wrapper">
+            <!-- カメラ映像 -->
+            <video id="camera" width="842" height="595" muted></video>
+
+            <!-- フレーム配置 -->
+            <canvas id="frame" width="842" height="595"></canvas>
+            <canvas id="paint" width="842" height="595"></canvas>
+            <!-- シャッターボタン -->
+            <div id="shutter-inner">
+                <button id="btn-shutter" type="button"><i class="fas fa-camera-retro"></i></button>
+            </div>
+            <nav>
+                <ul id="color">
+                    <li id="red"><i class="fas fa-fill-drip"></i></li>
+                    <li id="pink"><i class="fas fa-fill-drip"></i></li>
+                    <li id="orange"><i class="fas fa-fill-drip"></i></li>
+                    <li id="blue"><i class="fas fa-fill-drip"></i></li>
+                    <li id="green"><i class="fas fa-fill-drip"></i></li>
+                    <li id="yellow"><i class="fas fa-fill-drip"></i></li>
+                    <li id="black"><i class="fas fa-fill-drip"></i></li>
+                </ul>
+                <ul id="size">
+                    <li><i class="fas fa-pen"></i></li>
+                    <li><i class="fas fa-pen"></i></li>
+                    <li><i class="fas fa-pen"></i></li>
+                    <li id="eraser"><i class="fas fa-eraser"></i></li>
+                    <!-- <li id="save"><img src="images/save.png" width="44" height="44"></li> -->
+                </ul>
+            </nav>
+        </div>
+        <!-- フレーム切り替え -->
+        <div id="frame-inner">
+            <h2>Frame</h2>
+            <ul id="framelist">
+            </ul>
+        </div>
+    </section>
+
+    <!-- 合成用Canvas(不可視) -->
+    <canvas id="still" width="842" height="595"></canvas>
+
+    <!-- ダイアログ -->
+    <div id="dialog-outer">
+        <!-- 最終結果 -->
+        <div id="dialog-result" class="dialog">
+            <i id="dialog-result-close" class="far fa-times-circle"></i>
+            <p><canvas id="result" width="842" height="595"></canvas></p>
+            <button id="dialog-result-dl" type="button">
+                <i class="fas fa-download"></i>
+            </button>
+        </div>
+
+        <!--  NowLoading -->
+        <div id="dialog-nowloading" class="dialog">
+            ...Now Loading
+        </div>
+    </div>
+    <!-- /ダイアログ -->
+
+    <!-- シャッター音 -->
+    <audio id="shutter" preload="auto">
+        <source src="se/camera_shutter01.mp3" type="audio/mp3">
+    </audio>
+    <!-- ダウンロード音 -->
+    <audio id="download" preload="auto">
+        <source src="se/robot1.mp3" type="audio/mp3">
+    </audio>
+
+    <!-- JavaScript -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js"></script>
+
+    <script src="js/util.js" type="text/javascript"></script>
+    <script>
+        //-----------------------------------------------------
+        // グローバル変数
+        //-----------------------------------------------------
+        const VIDEO = document.querySelector("#camera"); // <video>
+        const FRAME = document.querySelector("#frame"); // <canvas>
+        const STILL = document.querySelector("#still"); // <canvas>
+        const SHUTTER = document.querySelector('#shutter'); // <audio>
+        const DOWNLOAD = document.querySelector('#download'); // <audio>
+
+        /** フレーム素材一覧 */
+        const FRAMES = [];
+        const FRAMES_COUNTS = 12; //フレーム数 12まで
+        for (let i = 0; i < FRAMES_COUNTS; i++) {
+            FRAMES.push({
+                large: "images/frame" + (i + 1) + ".png", // 大きいフレーム
+                small: "images/frame" + (i + 1) + "_s.png" //小さいフレーム
+            })
+        }
+
+        /** カメラ設定 */
+        const CONSTRAINTS = {
+            audio: false,
+            video: {
+                width: 842,
+                height: 595,
+                facingMode: "user" // フロントカメラを利用する
+                // facingMode: { exact: "environment" }  // リアカメラを利用する場合
+            }
+        };
+
+        //-----------------------------------------------------
+        // onload
+        //-----------------------------------------------------
+        window.onload = () => {
+            let no = 0;
+            //-----------------------------
+            //カメラを<video>と同期
+            //-----------------------------
+            syncCamera();
+
+            //-----------------------------
+            // フレーム初期化
+            //-----------------------------
+            let frame_no = Math.floor(Math.random() * FRAMES_COUNTS);
+            drawFrame(FRAMES[frame_no].large); // 初期フレームを表示
+            setFrameList(); // 切り替え用のフレーム一覧を表示
+
+            //-----------------------------
+            // シャッターボタン
+            //-----------------------------
+            document.querySelector("#btn-shutter").addEventListener("click", () => {
+                // SE再生＆映像停止
+                VIDEO.pause();
+                SHUTTER.play();
+
+                // 画像の生成
+                onShutter(); // カメラ映像から静止画を取得
+                concatCanvas("#result", ["#still", "#frame", "#paint"]); // フレームと合成
+
+                // 最終結果ダイアログを表示
+                setTimeout(() => { // 演出目的で少しタイミングをずらす
+                    dialogShow("#dialog-result");
+                }, 300);
+            });
+
+            //-----------------------------
+            // ダイアログ
+            //-----------------------------
+            // 閉じるボタン
+            document.querySelector("#dialog-result-close").addEventListener("click", (e) => {
+                VIDEO.play();
+                dialogHide("#dialog-result");
+            });
+
+            // ダウンロードボタン
+            document.querySelector("#dialog-result-dl").addEventListener("click", (e) => {
+                no++;
+                DOWNLOAD.play();
+                canvasDownload("#result", no);
+            });
+
+            // ペイント
+            var isTouch = ('ontouchstart' in window);
+            var WIDTH = 842;
+            var HEIGHT = 595;
+            var canvas = document.getElementById('paint');
+            // canvas.setAttribute('width', WIDTH);
+            // canvas.setAttribute('height', HEIGHT);
+            var drawFlag = false,
+                oldX = 0,
+                oldY = 0;
+            var canvasX = $('#paint').offset().left;
+            var canvasY = $('#paint').offset().top;
+            var context = canvas.getContext("2d");
+            var penColor = "rgb(255,0,0)",
+                penSize = 2;
+            $('#color li#red').addClass('active');
+            $('#size li:nth-of-type(1)').addClass('active');
+            // context.fillStyle = '#ffffFF';
+            // context.fillRect(0, 0, WIDTH, 380);
+            context.lineCap = 'round';
+            context.lineJoin = 'round';
+
+
+            $('#paint').on({
+                'touchstart mousedown': function (e) {
+                    e.preventDefault();
+                    this.pageX = (isTouch ? event.changedTouches[0].pageX : e.pageX);
+                    this.pageY = (isTouch ? event.changedTouches[0].pageY : e.pageY);
+
+                    drawFlag = true;
+                    context.strokeStyle = penColor;
+                    context.lineWidth = penSize;
+
+                    var blurSize = Number(penSize) + 1
+                    context.shadowBlur = blurSize;
+                    //console.log(blurSize);
+                    /**/
+                    context.shadowColor = penColor;
+                    oldX = this.pageX - canvasX;
+                    oldY = this.pageY - canvasY;
+                    context.beginPath();
+                    context.moveTo(oldX, oldY);
+                },
+                'touchmove mousemove': function (e) {
+                    if (!drawFlag) return;
+                    e.preventDefault();
+                    var x = (isTouch ? event.changedTouches[0].pageX : e.pageX) - canvasX;
+                    var y = (isTouch ? event.changedTouches[0].pageY : e.pageY) - canvasY;
+
+                    context.lineTo(x, y);
+                    context.stroke();
+                    //context.closePath();
+                    //oldX = x;
+                    //oldY = y;
+                },
+                'touchend mouseup': function (e) {
+
+                    drawFlag = false;
+                }
+            });
+            //消しゴム
+            $("#eraser").on('touchstart mousedown', function (e) {
+                context.clearRect(0, 0, WIDTH, HEIGHT);
+                context.beginPath();
+                context.fillStyle = 'transparent';
+                context.fillRect(0, 0, WIDTH, HEIGHT);
+            });
+
+            //線幅を変更
+            $("#size li").on('touchstart mousedown', function (e) {
+                // console.log($(this).index());
+                if($(this).index() != 3){
+                    $('#size li').removeClass('active');
+                }
+                if($(this).index() == 0){
+                    penSize = 2;
+                    $(this).addClass('active');
+                }else if($(this).index() == 1){
+                    penSize = 6;
+                    $(this).addClass('active');
+                }else if($(this).index() == 2){
+                    penSize = 14;
+                    $(this).addClass('active');
+                }                
+            });
+
+            //色を変更
+            $('#color li').on('touchstart mousedown', function (e) {
+                $('#color li').removeClass('active');
+                $(this).addClass('active');
+                penColor = $(this).css('color');
+            });
+        };
+    </script>
+    <script src="js/camera.js"></script>
+</body>
+
+</html>
